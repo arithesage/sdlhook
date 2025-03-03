@@ -1,12 +1,16 @@
+# ========================================================================
+# Makefile orienteed to build a library (dynamic or static)
+# ========================================================================
+
+# =================== INTERNALS ==========================================
 include Project.mk
 
 
-EXEC							:= ${PROJECT_NAME}
-
 ifneq (${WINDIR},)
+	LIB							:= ${PROJECT_NAME}.dll
 	SYSTEM						:= windows
-	EXEC						:= ${EXEC}.exe
 else
+	LIB							:= ${PROJECT_NAME}.so
 	UNAME						:= $(shell uname)
 
 	ifeq (${UNAME},Darwin)
@@ -24,29 +28,22 @@ BUILD							:= build
 OBJ								:= obj
 
 OBJS_PATH						:= ${OBJ}/${SYSTEM}
-DEPS_OBJS_PATH						:= $(DEPS)/${OBJ}/${SYSTEM}
+DEPS_OBJS_PATH					:= $(DEPS)/${OBJ}/${SYSTEM}
 BUILD_PATH						:= ${BUILD}/${SYSTEM}
 
-EXEC							:= ${BUILD}/${SYSTEM}/${EXEC}
+LIB								:= ${BUILD}/${SYSTEM}/${LIB}
 
 
 include Commands.mk
 include Functions.mk
 
-C_MAIN							:= $(shell find ${SRC}/** -type f -name "main.c")
-CPP_MAIN						:= $(shell find ${SRC}/** -type f -name "main.cpp")
 
-ifneq (${C_MAIN},)
-	MAIN						:= ${C_MAIN}
-else
-	MAIN						:= ${CPP_MAIN}
-endif
-
+MAIN							:= ${SRC}/${MAIN}
 MAIN_FILE						:= $(notdir ${MAIN})
 MAIN_OBJ						:= ${OBJS_PATH}/$(call SRC2OBJ,${MAIN_FILE})
 
-C_SRCS							:= $(shell find ${SRC}/** -type f -name "*.c" -not -name "main.c")
-CPP_SRCS						:= $(shell find ${SRC}/** -type f -name "*.cpp" -not -name "main.cpp")
+C_SRCS							:= $(shell find ${SRC}/** -type f -name "*.c" -not -name ${MAIN_FILE})
+CPP_SRCS						:= $(shell find ${SRC}/** -type f -name "*.cpp" -not -name ${MAIN_FILE})
 
 C_HEADERS						:= $(shell find ${SRC}/** -type f -name "*.h")
 CPP_HEADERS						:= $(shell find ${SRC}/** -type f -name "*.hpp")
@@ -68,21 +65,38 @@ DEPS_INCLUDE_PATHS				:= $(sort $(foreach file,${DEPS_HEADERS},$(dir ${file})))
 DEPS_INCLUDE					:= $(strip $(foreach inc,${DEPS_INCLUDE_PATHS},-I ${inc}))
 DEPS_OBJS						:= $(foreach src,${DEPS_SRCS},${DEPS_OBJS_PATH}/$(notdir $(subst .c,.o,$(subst .cpp,.o,${src}))))
 
-ifeq (${C},)
-	C							:= clang
+C								:= clang
+CXX								:= clang++
+
+GLOBAL_FLAGS					:= -Wall -pedantic
+GLOBAL_LDFLAGS					:= 
+
+ifdef DYNAMIC_LIB
+	GLOBAL_FLAGS				+= -fPIC
+	GLOBAL_LDFLAGS				+= -shared
+	LIBS						+= -ldl
 endif
 
-ifeq (${CXX},)
-	CXX							:= clang++
+CFLAGS							+= ${GLOBAL_FLAGS}
+CXXFLAGS						+= ${GLOBAL_FLAGS}
+
+ifdef RELEASE
+	CFLAGS						+= -O3
+	CXXFLAGS					+= -O3
+else
+	CFLAGS						+= -g
+	CXXFLAGS					+= -g
 endif
 
+LDFLAGS							+= ${GLOBAL_LDFLAGS}
 
 
 
-.PHONY: all cleandeps deps clean info run
+
+.PHONY: all cleandeps deps clean info
 
 
-all: ${OBJS_PATH} ${BUILD_PATH} ${EXEC}
+all: ${OBJS_PATH} ${BUILD_PATH} ${LIB}
 
 
 clean:
@@ -106,18 +120,18 @@ ${OBJS_PATH}:
 	$(shell ${MKTREE} ${OBJS_PATH})
 
 
-# Builds the executable
-${EXEC}: ${OBJS} ${MAIN_OBJ}
-ifeq (${MAIN_FILE},main.c)
-	${C} ${DEPS_OBJS} ${OBJS} ${MAIN_OBJ} -o ${EXEC} ${LIBS} ${LDFLAGS}
+# Builds the library
+${LIB}: ${OBJS} ${MAIN_OBJ}
+ifeq ($(suffix ${MAIN_FILE}),.c)
+	${C} ${DEPS_OBJS} ${OBJS} ${MAIN_OBJ} -o ${LIB} ${LIBS} ${LDFLAGS}
 else
-	${CXX} ${DEPS_OBJS} ${OBJS} ${MAIN_OBJ} -o ${EXEC} ${LIBS} ${LDFLAGS}
+	${CXX} ${DEPS_OBJS} ${OBJS} ${MAIN_OBJ} -o ${LIB} ${LIBS} ${LDFLAGS}
 endif
 
 
 # Builds the main object
 ${MAIN_OBJ}: ${MAIN}
-ifeq (${MAIN_FILE},main.c)
+ifeq ($(suffix ${MAIN_FILE}),.c)
 	${C} -c ${MAIN} -o ${MAIN_OBJ} ${DEPS_INCLUDE} ${INCLUDE} ${CFLAGS}
 else
 	${CXX} -c ${MAIN} -o ${MAIN_OBJ} ${DEPS_INCLUDE} ${INCLUDE} ${CXXFLAGS}
@@ -138,8 +152,11 @@ ${OBJS_PATH}/%.o: ${SRC}/%.cpp
 
 info:
 	$(info PROJECT_NAME: ${PROJECT_NAME})
-	$(info EXEC: ${EXEC})
+	$(info LIB: ${LIB})
+	$(info DYNAMIC_LIB: ${DYNAMIC_LIB})
 	$(info SYSTEM: ${SYSTEM})
+	$(info C: ${C})
+	$(info CXX: ${CXX})
 	$(info MAIN: ${MAIN})
 	$(info MAIN_FILE: ${MAIN_FILE})
 	$(info MAIN_OBJ: ${MAIN_OBJ})
@@ -151,15 +168,11 @@ info:
 	$(info OBJS: ${OBJS})
 	$(info INCLUDED_PATHS: ${INCLUDE})
 	$(info LIBS: ${LIBS})
+	$(info CFLAGS: ${CFLAGS})
+	$(info CXXFLAGS: ${CXXFLAGS})
+	$(info LDFLAGS: ${LDFLAGS})
 	$(info DEPS_SRCS: ${DEPS_SRCS})
 	$(info DEPS_HEADERS: ${DEPS_HEADERS})
 	$(info DEPS_INCLUDE: ${DEPS_INCLUDE})
 	$(info DEPS_OBJS: ${DEPS_OBJS})
 
-
-run:
-ifeq (${SYSTEM},windows)
-	${EXEC}
-else
-	./${EXEC}
-endif
